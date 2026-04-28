@@ -1,4 +1,40 @@
-# Integrations
+# Channels and Integrations
+
+Boop has two layers of external connectivity:
+
+- **Channels** — how the user talks to Boop. Sendblue (iMessage) and Telegram are supported. Pick one or both.
+- **Integrations** — what Boop can do for the user (Gmail, Slack, GitHub, …). All powered by Composio.
+
+---
+
+## Channels
+
+Both channels are optional. `npm run setup` lets you pick which to enable. They run in parallel and stay separate:
+
+- Sendblue conversations: `conversationId = "sms:+E164"`.
+- Telegram conversations: `conversationId = "tg:<chat_id>"`.
+
+The interaction agent and automations route replies via the conversation's prefix — no cross-posting.
+
+### Sendblue (iMessage bridge)
+
+1. Sign up at [sendblue.co](https://sendblue.co).
+2. `npm run setup` pulls the keys via the Sendblue CLI (or paste manually).
+3. `npm run dev` auto-registers the inbound webhook with Sendblue each restart on free ngrok.
+
+### Telegram bot
+
+1. Open [@BotFather](https://t.me/BotFather) in Telegram, send `/newbot`, follow the prompts.
+2. Paste the bot token into `npm run setup` (Telegram branch). The setup script auto-generates `TELEGRAM_WEBHOOK_SECRET`.
+3. (Recommended) set `TELEGRAM_ALLOWED_CHAT_IDS` to your own chat_id (find via [@userinfobot](https://t.me/userinfobot)) so randoms can't talk to your bot.
+4. `npm run dev` calls `setWebhook` with the current public URL and secret token on every start. Disable with `TELEGRAM_AUTO_WEBHOOK=false` and run `npm run telegram:setup` manually.
+5. Open the bot in Telegram and send a message — the agent replies in MarkdownV2 (set `TELEGRAM_PLAIN=true` to disable rich formatting).
+
+Telegram's message limit is 4096 chars; Boop chunks at 4000. The `escapeMarkdownV2` helper in `server/telegram.ts` handles MarkdownV2's reserved characters and converts CommonMark `**bold**` → Telegram `*bold*`. If parsing fails, Boop transparently retries the message as plain text.
+
+---
+
+## Integrations (via Composio)
 
 Boop's integrations are provided by [Composio](https://composio.dev/?utm_source=chris&utm_medium=youtube&utm_campaign=collab), a tool-aggregator that exposes 1000+ third-party services (Gmail, GitHub, Slack, Notion, Linear, Google Drive, HubSpot, Salesforce, …) behind one API.
 

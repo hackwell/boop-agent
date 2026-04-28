@@ -3,6 +3,7 @@ import prompts from "prompts";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 
 const ROOT = resolve(new URL(".", import.meta.url).pathname, "..");
 const ENV_PATH = resolve(ROOT, ".env.local");
@@ -304,24 +305,108 @@ async function importSendblueFromCli(): Promise<SendblueKeys | null> {
   }
 }
 
+async function configureTelegram(
+  existing: Record<string, string>,
+): Promise<Partial<Record<string, string>>> {
+  banner("Telegram bot");
+  console.log(`
+Boop talks to you via a Telegram bot:
+  1. Open https://t.me/BotFather in Telegram and send /newbot
+  2. Pick a name + username, BotFather replies with a token
+  3. Paste the token below
+`);
+  openInBrowser("https://t.me/BotFather");
+
+  const { TELEGRAM_BOT_TOKEN } = await prompts(
+    {
+      type: "password",
+      name: "TELEGRAM_BOT_TOKEN",
+      message: "Telegram bot token (from @BotFather)",
+      initial: existing.TELEGRAM_BOT_TOKEN ?? "",
+    },
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+
+  const { TELEGRAM_ALLOWED_CHAT_IDS } = await prompts({
+    type: "text",
+    name: "TELEGRAM_ALLOWED_CHAT_IDS",
+    message:
+      "Whitelist of chat_ids that can talk to the bot (comma-separated, leave blank for open). Find yours via @userinfobot.",
+    initial: existing.TELEGRAM_ALLOWED_CHAT_IDS ?? "",
+  });
+
+  const TELEGRAM_WEBHOOK_SECRET = existing.TELEGRAM_WEBHOOK_SECRET || randomUUID().replace(/-/g, "");
+
+  return {
+    TELEGRAM_BOT_TOKEN: TELEGRAM_BOT_TOKEN ?? "",
+    TELEGRAM_WEBHOOK_SECRET,
+    TELEGRAM_ALLOWED_CHAT_IDS: TELEGRAM_ALLOWED_CHAT_IDS ?? "",
+  };
+}
+
 async function main() {
   banner("boop-agent setup");
 
   console.log(`
 What this does:
-  1. Pulls your Sendblue keys (via their CLI, or you paste them)
-  2. Asks about your Claude model preference
-  3. Runs \`npx convex dev\` to create a Convex project
-  4. Writes .env.local
+  1. Picks your messaging channel(s): Sendblue (iMessage) and/or Telegram
+  2. Configures the channel credentials (CLI / paste / bot token)
+  3. Asks about your Claude model preference
+  4. Runs \`npx convex dev\` to create a Convex project
+  5. Writes .env.local
 
 Before you start:
   • A Claude Code subscription:    https://claude.com/code
   • Convex account (free tier):    https://convex.dev
-  • Sendblue (free on agent plan): https://sendblue.co
+  • At least one of:
+    – Sendblue (iMessage):         https://sendblue.co
+    – Telegram bot via @BotFather: https://t.me/BotFather
 `);
 
   const existing = readEnv(ENV_PATH);
-  const cli = await importSendblueFromCli();
+
+  const defaultChannels: string[] = [];
+  if (existing.SENDBLUE_API_KEY) defaultChannels.push("sendblue");
+  if (existing.TELEGRAM_BOT_TOKEN) defaultChannels.push("telegram");
+  if (defaultChannels.length === 0) defaultChannels.push("sendblue");
+
+  const { channels } = await prompts(
+    {
+      type: "multiselect",
+      name: "channels",
+      message: "Which messaging channel(s) do you want to use? (space to toggle, enter to confirm)",
+      choices: [
+        {
+          title: "Sendblue (iMessage bridge — US phone, paid)",
+          value: "sendblue",
+          selected: defaultChannels.includes("sendblue"),
+        },
+        {
+          title: "Telegram bot (free, worldwide, via @BotFather)",
+          value: "telegram",
+          selected: defaultChannels.includes("telegram"),
+        },
+      ],
+      min: 1,
+      hint: "At least one channel is required.",
+    },
+    {
+      onCancel: () => {
+        console.log("Setup cancelled.");
+        process.exit(1);
+      },
+    },
+  );
+
+  const wantSendblue = channels.includes("sendblue");
+  const wantTelegram = channels.includes("telegram");
+
+  const cli = wantSendblue ? await importSendblueFromCli() : null;
 
   const sendblueDefaults = {
     SENDBLUE_API_KEY: cli?.apiKey ?? existing.SENDBLUE_API_KEY ?? "",
@@ -330,7 +415,7 @@ Before you start:
   };
 
   const sendbluePrompts = [] as any[];
-  if (!sendblueDefaults.SENDBLUE_API_KEY) {
+  if (wantSendblue && !sendblueDefaults.SENDBLUE_API_KEY) {
     sendbluePrompts.push({
       type: "text",
       name: "SENDBLUE_API_KEY",
@@ -338,7 +423,7 @@ Before you start:
       initial: "",
     });
   }
-  if (!sendblueDefaults.SENDBLUE_API_SECRET) {
+  if (wantSendblue && !sendblueDefaults.SENDBLUE_API_SECRET) {
     sendbluePrompts.push({
       type: "password",
       name: "SENDBLUE_API_SECRET",
@@ -346,7 +431,7 @@ Before you start:
       initial: "",
     });
   }
-  if (!sendblueDefaults.SENDBLUE_FROM_NUMBER) {
+  if (wantSendblue && !sendblueDefaults.SENDBLUE_FROM_NUMBER) {
     sendbluePrompts.push({
       type: "text",
       name: "SENDBLUE_FROM_NUMBER",
@@ -392,11 +477,31 @@ Before you start:
   );
 
   // Merge CLI-sourced defaults with what the user answered (answer wins).
-  Object.assign(answers, {
-    SENDBLUE_API_KEY: answers.SENDBLUE_API_KEY ?? sendblueDefaults.SENDBLUE_API_KEY,
-    SENDBLUE_API_SECRET: answers.SENDBLUE_API_SECRET ?? sendblueDefaults.SENDBLUE_API_SECRET,
-    SENDBLUE_FROM_NUMBER: answers.SENDBLUE_FROM_NUMBER ?? sendblueDefaults.SENDBLUE_FROM_NUMBER,
-  });
+  if (wantSendblue) {
+    Object.assign(answers, {
+      SENDBLUE_API_KEY: answers.SENDBLUE_API_KEY ?? sendblueDefaults.SENDBLUE_API_KEY,
+      SENDBLUE_API_SECRET: answers.SENDBLUE_API_SECRET ?? sendblueDefaults.SENDBLUE_API_SECRET,
+      SENDBLUE_FROM_NUMBER: answers.SENDBLUE_FROM_NUMBER ?? sendblueDefaults.SENDBLUE_FROM_NUMBER,
+    });
+  } else {
+    // User unselected Sendblue — clear stale credentials.
+    Object.assign(answers, {
+      SENDBLUE_API_KEY: "",
+      SENDBLUE_API_SECRET: "",
+      SENDBLUE_FROM_NUMBER: "",
+    });
+  }
+
+  if (wantTelegram) {
+    const tg = await configureTelegram(existing);
+    Object.assign(answers, tg);
+  } else {
+    Object.assign(answers, {
+      TELEGRAM_BOT_TOKEN: "",
+      TELEGRAM_WEBHOOK_SECRET: "",
+      TELEGRAM_ALLOWED_CHAT_IDS: "",
+    });
+  }
 
   // ---- Composio API key ---------------------------------------------------
   banner("Composio — integrations (Gmail, Slack, GitHub, Linear, 1000+ more)");
@@ -559,7 +664,6 @@ You can override with ANTHROPIC_API_KEY in .env.local if you'd rather use an API
     console.log("\nSkipped Convex. Run `npx convex dev` yourself when ready.");
   }
 
-  const port = answers.PORT ?? "3456";
   banner("You're set up. Here's how to actually run it.");
   console.log(`
 Before you start: install ngrok (one-time).
@@ -568,9 +672,8 @@ Before you start: install ngrok (one-time).
   # or download:  https://ngrok.com/download
   ngrok config add-authtoken <your-token>      # free at https://dashboard.ngrok.com
 
-⚠ ngrok's FREE plan gives you a NEW URL every restart. That means
-  re-pasting into Sendblue every time.  For anything beyond a demo,
-  use a stable URL:
+⚠ ngrok's FREE plan gives you a NEW URL every restart. For anything beyond
+  a demo, use a stable URL:
     • ngrok paid plan (reserved domain), or
     • Cloudflare Tunnel: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
 
@@ -581,27 +684,41 @@ Then run ONE command:
 That starts the server, Convex watcher, debug dashboard, AND ngrok all
 together — color-prefixed output so you can tell who's saying what. Once
 the tunnel is live, you'll see a banner with your public URL.
+`);
 
+  if (wantSendblue) {
+    console.log(`
 Wire up Sendblue (one-time, takes ~30 seconds):
 
-  1. Copy the "Sendblue webhook" URL printed by ngrok.
+  1. Copy the "Sendblue webhook" URL printed by ngrok (or by \`npm run dev\`).
   2. Sendblue dashboard → API Settings → Webhook Configuration
   3. Add it as an INBOUND MESSAGE webhook.
   4. Paste the URL. Save.
 
-Test it:
-  • Open http://localhost:5173 for the debug dashboard (Chat tab works
-    without Sendblue).
-  • Or text your Sendblue number from a different phone. The agent replies.
-
 Gotcha to double-check:
   SENDBLUE_FROM_NUMBER in .env.local must be your Sendblue-provisioned
-  number (the one people text TO), NOT your personal cell. Sendblue
-  rejects sends with "Cannot send messages to self" or "missing required
-  parameter: from_number" otherwise.
+  number (the one people text TO), NOT your personal cell.
+`);
+  }
 
+  if (wantTelegram) {
+    console.log(`
+Wire up Telegram:
+
+  • \`npm run dev\` auto-registers the webhook with Telegram each time the
+    public URL changes (set TELEGRAM_AUTO_WEBHOOK=false to disable).
+  • Or run \`npm run telegram:setup\` manually with PUBLIC_URL set.
+  • Open Telegram and message your bot (the username @BotFather gave you).
+  • If TELEGRAM_ALLOWED_CHAT_IDS is set, only those chat_ids get a reply.
+`);
+  }
+
+  console.log(`
+Test it:
+  • Open http://localhost:5173 for the debug dashboard (Chat tab always works).
+${wantSendblue ? "  • Or text your Sendblue number from a different phone.\n" : ""}${wantTelegram ? "  • Or open Telegram and message your bot.\n" : ""}
 Integrations (via Composio):
-  1. Set COMPOSIO_API_KEY in .env.local (get one at https://app.composio.dev/developers?utm_source=chris&utm_medium=youtube&utm_campaign=collab).
+  1. Set COMPOSIO_API_KEY in .env.local (get one at https://app.composio.dev/developers).
   2. Open the debug dashboard → Connections tab.
   3. Click Connect on any toolkit (Gmail, Slack, GitHub, Linear, Notion, …).
   4. Composio handles OAuth; the toolkit becomes available to the agent.

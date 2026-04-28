@@ -135,25 +135,84 @@ async function waitForNgrokUrl(timeoutMs = 15000) {
   return null;
 }
 
-function showBanner(url, stable) {
+async function getTelegramBotInfo() {
+  const token = envVars.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const data = await res.json().catch(() => null);
+    if (data?.ok && data.result?.username) return data.result;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function showBanner(url, stable) {
   const line = "═".repeat(68);
-  const webhook = `${url}/sendblue/webhook`;
   const dashboard = `http://localhost:5173`;
-  const from = envVars.SENDBLUE_FROM_NUMBER;
-  const fromLine = from
-    ? `  📱 Text this Sendblue number:  ${from}  (from a DIFFERENT phone)`
-    : `  ⚠ SENDBLUE_FROM_NUMBER is not set — outbound sends will fail.\n     Run: npm run sendblue:sync   (pulls it from the Sendblue CLI)`;
+  const hasSendblue = Boolean(envVars.SENDBLUE_API_KEY && envVars.SENDBLUE_API_SECRET);
+  const hasTelegram = Boolean(envVars.TELEGRAM_BOT_TOKEN);
+
+  const channelLines = [];
+  let registered = false;
+
+  if (hasSendblue) {
+    const webhook = `${url}/sendblue/webhook`;
+    const from = envVars.SENDBLUE_FROM_NUMBER;
+    channelLines.push(`  📮 Sendblue webhook (inbound):   ${webhook}`);
+    if (from) {
+      channelLines.push(`  📱 Text this Sendblue number:    ${from}  (from a DIFFERENT phone)`);
+    } else {
+      channelLines.push(
+        `  ⚠ SENDBLUE_FROM_NUMBER is not set — outbound sends will fail.\n     Run: npm run sendblue:sync   (pulls it from the Sendblue CLI)`,
+      );
+    }
+    if (!stable) registered = true;
+  }
+
+  if (hasTelegram) {
+    const webhook = `${url}/telegram/webhook`;
+    channelLines.push(`  💬 Telegram webhook (inbound):   ${webhook}`);
+    const bot = await getTelegramBotInfo();
+    if (bot?.username) {
+      channelLines.push(`  💬 Message your bot:             https://t.me/${bot.username}`);
+    } else {
+      channelLines.push(
+        `  ⚠ Could not reach Telegram getMe — check TELEGRAM_BOT_TOKEN.`,
+      );
+    }
+    const whitelist = (envVars.TELEGRAM_ALLOWED_CHAT_IDS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (whitelist.length > 0) {
+      channelLines.push(`  🔒 Telegram whitelist:           ${whitelist.length} chat_id(s)`);
+    } else {
+      channelLines.push(
+        `  ⚠ Telegram whitelist empty — anyone who finds the bot can talk to it.`,
+      );
+    }
+  }
+
+  if (!hasSendblue && !hasTelegram) {
+    channelLines.push(
+      `  ⚠ No channel configured. Use the Chat tab in the dashboard, or run\n     \`npm run setup\` to add Sendblue or Telegram.`,
+    );
+  }
 
   const headline = stable
     ? `your STABLE public URL is live.`
-    : `ngrok tunnel is live  (webhook auto-registered with Sendblue).`;
-  const footer = stable
+    : registered
+      ? `ngrok tunnel is live  (webhooks auto-registered).`
+      : `ngrok tunnel is live.`;
+  const footer = stable || !registered
     ? ``
-    : `\n${C.dim}  ℹ The inbound webhook above was registered with Sendblue automatically.
-    Set SENDBLUE_AUTO_WEBHOOK=false in .env.local to disable, or pick a
-    stable URL (ngrok paid / Cloudflare Tunnel) via \`npm run setup\`.${C.reset}\n`;
-  const guide = stable
-    ? `\n  → First time? Sendblue dashboard → API Settings → Webhook\n    Configuration → add ${webhook} as INBOUND MESSAGE.\n`
+    : `\n${C.dim}  ℹ Inbound webhooks above were registered automatically. Disable with
+    SENDBLUE_AUTO_WEBHOOK=false / TELEGRAM_AUTO_WEBHOOK=false. For a stable
+    URL pick ngrok paid / Cloudflare Tunnel via \`npm run setup\`.${C.reset}\n`;
+  const guide = stable && hasSendblue
+    ? `\n  → First time? Sendblue dashboard → API Settings → Webhook\n    Configuration → add ${url}/sendblue/webhook as INBOUND MESSAGE.\n`
     : ``;
 
   console.log(`
@@ -162,8 +221,7 @@ ${C.banner}${line}
 
   🐶 Debug dashboard (click me):   ${dashboard}
   🌐 Public URL:                   ${url}
-  📮 Sendblue webhook (inbound):   ${webhook}
-${fromLine}${guide}
+${channelLines.join("\n")}${guide}
 ${line}${C.reset}${footer}`);
 }
 
@@ -227,9 +285,31 @@ if (useNgrok && ngrokInstalled) {
 // so the URL isn't dangled in front of the user while Convex is still booting.
 async function autoRegisterWebhook(publicUrl) {
   if (envVars.SENDBLUE_AUTO_WEBHOOK === "false") return;
+  if (!envVars.SENDBLUE_API_KEY || !envVars.SENDBLUE_API_SECRET) return;
   const webhookUrl = `${publicUrl}/sendblue/webhook`;
   const prefix = `${C.ngrok}webhook${C.reset} │ `;
   const child = spawn("node", ["scripts/sendblue-webhook.mjs", webhookUrl], {
+    cwd: root,
+    env: { ...process.env },
+  });
+  child.stdout.on("data", (d) => {
+    for (const line of d.toString().split("\n")) {
+      if (line.trim()) process.stdout.write(prefix + line + "\n");
+    }
+  });
+  child.stderr.on("data", (d) => {
+    for (const line of d.toString().split("\n")) {
+      if (line.trim()) process.stdout.write(prefix + line + "\n");
+    }
+  });
+  await new Promise((r) => child.on("exit", r));
+}
+
+async function autoRegisterTelegramWebhook(publicUrl) {
+  if (envVars.TELEGRAM_AUTO_WEBHOOK === "false") return;
+  if (!envVars.TELEGRAM_BOT_TOKEN) return;
+  const prefix = `${C.ngrok}telegram${C.reset} │ `;
+  const child = spawn("node", ["scripts/telegram-setup.mjs", publicUrl], {
     cwd: root,
     env: { ...process.env },
   });
@@ -260,14 +340,18 @@ Promise.all([
         if (!ngrokDomain) {
           await autoRegisterWebhook(ngrokUrl);
         }
-        showBanner(ngrokUrl, Boolean(ngrokDomain));
+        // Telegram setWebhook is idempotent — register on every startup so a
+        // restarted bot recovers without manual intervention.
+        await autoRegisterTelegramWebhook(ngrokUrl);
+        await showBanner(ngrokUrl, Boolean(ngrokDomain));
       } else {
         console.log(
           `${C.ngrok}ngrok${C.reset} │ could not read tunnel URL from http://127.0.0.1:4040 — check ngrok output above.`,
         );
       }
     } else if (hasStaticUrl) {
-      showBanner(publicUrl, true);
+      await autoRegisterTelegramWebhook(publicUrl);
+      await showBanner(publicUrl, true);
     } else {
       const line = "═".repeat(68);
       console.log(`

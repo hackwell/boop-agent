@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import { addClient } from "./broadcast.js";
 import { createSendblueRouter } from "./sendblue.js";
+import { createTelegramRouter, telegramConfigured } from "./telegram.js";
 import { handleUserMessage } from "./interaction-agent.js";
 import { loadIntegrations } from "./integrations/registry.js";
 import { startCleanupLoop } from "./memory/clean.js";
@@ -13,6 +14,10 @@ import { startHeartbeatLoop } from "./heartbeat.js";
 import { startConsolidationLoop } from "./consolidation.js";
 import { cancelAgent, retryAgent } from "./execution-agent.js";
 import { createComposioRouter } from "./composio-routes.js";
+
+function sendblueConfigured(): boolean {
+  return Boolean(process.env.SENDBLUE_API_KEY && process.env.SENDBLUE_API_SECRET);
+}
 
 async function main() {
   await loadIntegrations();
@@ -29,7 +34,19 @@ async function main() {
     res.json({ ok: true, service: "boop-agent" });
   });
 
-  app.use("/sendblue", createSendblueRouter());
+  const hasSendblue = sendblueConfigured();
+  const hasTelegram = telegramConfigured();
+  if (hasSendblue) {
+    app.use("/sendblue", createSendblueRouter());
+  }
+  if (hasTelegram) {
+    app.use("/telegram", createTelegramRouter());
+  }
+  if (!hasSendblue && !hasTelegram) {
+    console.warn(
+      "[boop] No messaging channel configured. Set SENDBLUE_API_KEY+SENDBLUE_API_SECRET or TELEGRAM_BOT_TOKEN in .env.local. Local /chat endpoint still works.",
+    );
+  }
   app.use("/composio", createComposioRouter());
 
   app.post("/agents/:id/cancel", (req, res) => {
@@ -87,7 +104,12 @@ async function main() {
     console.log(`boop-agent server listening on :${port}`);
     console.log(`  health      GET  http://localhost:${port}/health`);
     console.log(`  chat        POST http://localhost:${port}/chat`);
-    console.log(`  sendblue    POST http://localhost:${port}/sendblue/webhook`);
+    if (hasSendblue) {
+      console.log(`  sendblue    POST http://localhost:${port}/sendblue/webhook`);
+    }
+    if (hasTelegram) {
+      console.log(`  telegram    POST http://localhost:${port}/telegram/webhook`);
+    }
     console.log(`  websocket   WS   ws://localhost:${port}/ws`);
   });
 }

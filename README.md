@@ -36,7 +36,8 @@ Built on:
 ## What you get
 
 - **iMessage in / iMessage out** via Sendblue (with typing indicators and webhook dedup).
-- **Sendblue CLI integration** — `npm run dev` auto-registers the inbound webhook for you every restart (no re-pasting into the dashboard when free ngrok rotates your URL).
+- **Telegram bot alternative** — free, worldwide, no US phone number needed. `npm run setup` lets you pick Sendblue, Telegram, or both; conversations stay separate (`sms:` vs `tg:` prefix).
+- **Sendblue CLI integration** — `npm run dev` auto-registers the inbound webhook for you every restart (no re-pasting into the dashboard when free ngrok rotates your URL). Telegram webhook auto-registration works the same way.
 - **Dispatcher + workers** pattern: a lean interaction agent decides what to do, spawns focused sub-agents that actually do the work.
 - **Pure dispatcher** — the interaction agent has only memory + spawn + automation + draft tools. Web access, files, and integrations are explicitly denied to it; sub-agents get `WebSearch` / `WebFetch` / the integrations.
 - **Tiered memory** (short / long / permanent) with post-turn extraction, decay, and cleaning.
@@ -356,8 +357,13 @@ Everything lives in `.env.local` (auto-created by `npm run setup`). See `.env.ex
 | Var | Required | Notes |
 |---|---|---|
 | `CONVEX_URL` / `VITE_CONVEX_URL` | yes | Convex deployment URL. Written by `npx convex dev`. |
-| `SENDBLUE_API_KEY` / `SENDBLUE_API_SECRET` | yes | From your Sendblue dashboard. |
-| `SENDBLUE_FROM_NUMBER` | yes | Your Sendblue-provisioned number. |
+| `SENDBLUE_API_KEY` / `SENDBLUE_API_SECRET` | one channel required | From your Sendblue dashboard. Skip if you only want Telegram. |
+| `SENDBLUE_FROM_NUMBER` | with Sendblue | Your Sendblue-provisioned number. |
+| `TELEGRAM_BOT_TOKEN` | one channel required | Token from `@BotFather`. Skip if you only want Sendblue. |
+| `TELEGRAM_WEBHOOK_SECRET` | with Telegram | Random string echoed back in the `X-Telegram-Bot-Api-Secret-Token` header — rejects spoofed webhook calls. `npm run setup` generates one. |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | optional | CSV of chat_ids allowed to talk to the bot. Empty = open. Find your own via `@userinfobot`. |
+| `TELEGRAM_PLAIN` | optional | `true` to send plain text instead of MarkdownV2. Default: MarkdownV2. |
+| `TELEGRAM_AUTO_WEBHOOK` | optional | `false` to disable auto-registering the webhook on `npm run dev`. |
 | `BOOP_MODEL` | no | Default `claude-sonnet-4-6`. |
 | `BOOP_UPSTREAM_CHECK` | no | Set to `false` to disable the new-version banner on `npm run dev`. Default: on. |
 | `PORT` | no | Default `3456`. |

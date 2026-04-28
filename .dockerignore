@@ -1,0 +1,40 @@
+node_modules
+npm-debug.log*
+.git
+.gitignore
+.dockerignore
+Dockerfile
+docker-compose*.yml
+
+# Local-only artifacts
+.env
+.env.local
+.env.*.local
+debug/dist
+.vite
+.cache
+.tsbuildinfo
+*.log
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode
+
+# Local dev directories
+data
+*.db
+*.db-journal
+*.sqlite
+
+# Convex local state — production receives these via codegen at build time
+.convex
+
+# Heavy assets / docs that don't belong in the runtime image
+assets
+debug
+.code-review-graph
+.agents
+.claude
+.planning
+debug/dist
