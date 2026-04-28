@@ -41,6 +41,31 @@ async function main() {
     next();
   });
 
+  // Public paths that bypass dashboard auth: external webhook callers
+  // (Telegram, Sendblue) can't speak HTTP Basic, and /health must stay open
+  // for Coolify's healthcheck probe.
+  const PUBLIC_PREFIXES = ["/health", "/telegram/webhook", "/sendblue/webhook"];
+  const dashboardAuth = process.env.BOOP_DASHBOARD_AUTH?.trim();
+  if (dashboardAuth && !dashboardAuth.includes(":")) {
+    console.warn("[boop] BOOP_DASHBOARD_AUTH must be 'user:password' — auth disabled");
+  }
+  const expectedAuth = dashboardAuth && dashboardAuth.includes(":")
+    ? "Basic " + Buffer.from(dashboardAuth).toString("base64")
+    : null;
+  if (expectedAuth) {
+    app.use((req, res, next) => {
+      if (PUBLIC_PREFIXES.some((p) => req.path === p || req.path.startsWith(p + "/"))) {
+        return next();
+      }
+      if (req.headers.authorization === expectedAuth) return next();
+      res.setHeader("WWW-Authenticate", 'Basic realm="boop"');
+      res.status(401).send("Authentication required");
+    });
+    console.log("[boop] dashboard auth enabled");
+  } else {
+    console.warn("[boop] dashboard auth NOT enabled — set BOOP_DASHBOARD_AUTH=user:pass");
+  }
+
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "boop-agent" });
   });
@@ -118,7 +143,15 @@ async function main() {
   }
 
   const server = createServer(app);
-  const wss = new WebSocketServer({ server, path: "/ws" });
+  const wss = new WebSocketServer({
+    server,
+    path: "/ws",
+    verifyClient: (info, cb) => {
+      if (!expectedAuth) return cb(true);
+      if (info.req.headers.authorization === expectedAuth) return cb(true);
+      cb(false, 401, "Unauthorized");
+    },
+  });
   wss.on("connection", (ws) => {
     addClient(ws);
     ws.send(JSON.stringify({ event: "hello", data: { ok: true }, at: Date.now() }));
