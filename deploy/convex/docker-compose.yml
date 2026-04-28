@@ -1,0 +1,35 @@
+services:
+  backend:
+    image: ghcr.io/get-convex/convex-backend:a9a760ca10399ed42e1b4bb87c78539a235488c7
+    volumes:
+      - data:/convex/data
+    environment:
+      - SERVICE_FQDN_BACKEND_3210
+      - INSTANCE_NAME=boop-prod
+      - INSTANCE_SECRET=${SERVICE_HEX_32_SECRET}
+      - CONVEX_CLOUD_ORIGIN=$SERVICE_FQDN_BACKEND
+      - CONVEX_SITE_ORIGIN=$SERVICE_FQDN_BACKEND
+      - DISABLE_BEACON=true
+      - REDACT_LOGS_TO_CLIENT=false
+      - DO_NOT_REQUIRE_SSL=false
+      - RUST_LOG=info
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3210/version"]
+      interval: 5s
+      start_period: 10s
+
+  dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:a9a760ca10399ed42e1b4bb87c78539a235488c7
+    environment:
+      - SERVICE_FQDN_DASHBOARD_6791
+      - NEXT_PUBLIC_DEPLOYMENT_URL=$SERVICE_FQDN_BACKEND
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:6791/"]
+      interval: 5s
+      start_period: 5s
+
+volumes:
+  data:
