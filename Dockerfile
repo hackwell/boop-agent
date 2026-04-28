@@ -35,7 +35,7 @@ RUN if [ ! -f convex/_generated/api.js ]; then \
       mkdir -p convex/_generated && \
       printf 'export const api = new Proxy({}, { get: () => new Proxy({}, { get: () => () => undefined }) });\nexport const internal = api;\n' > convex/_generated/api.js && \
       printf 'export const mutation = (def) => def;\nexport const query = (def) => def;\nexport const action = (def) => def;\nexport const internalMutation = (def) => def;\nexport const internalQuery = (def) => def;\nexport const internalAction = (def) => def;\n' > convex/_generated/server.js; \
-    fi && chown -R boop:boop convex/_generated
+    fi && chown -R boop:boop convex/_generated && chown boop:boop /app
 
 USER boop
 EXPOSE 3456
