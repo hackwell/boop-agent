@@ -11,6 +11,19 @@ ENV NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
 COPY package.json package-lock.json* ./
 RUN npm ci
 
+# Build the debug dashboard (Vite + React) so the prod container can serve it
+# at the site root. Done in a separate stage so the runtime image doesn't carry
+# Vite or its plugins.
+FROM node:20-bookworm-slim AS debug-build
+WORKDIR /app
+ENV NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
+COPY --from=deps /app/node_modules ./node_modules
+COPY package.json package-lock.json* ./
+COPY tsconfig.json ./
+COPY debug ./debug
+COPY convex ./convex
+RUN npm run build:debug
+
 FROM node:20-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production \
@@ -26,6 +39,7 @@ RUN apt-get update && \
 
 COPY --from=deps --chown=boop:boop /app/node_modules ./node_modules
 COPY --chown=boop:boop . .
+COPY --from=debug-build --chown=boop:boop /app/debug/dist ./debug/dist
 
 # If `convex/_generated/` is missing (e.g. .gitignore strips it), fall back to
 # minimal stubs so the runtime imports don't crash. The real generated files

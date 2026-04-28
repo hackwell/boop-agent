@@ -2,6 +2,9 @@ import "./env-setup.js";
 import express from "express";
 import cors from "cors";
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { WebSocketServer } from "ws";
 import { addClient } from "./broadcast.js";
 import { createSendblueRouter } from "./sendblue.js";
@@ -29,6 +32,14 @@ async function main() {
   const app = express();
   app.use(cors());
   app.use(express.json({ limit: "2mb" }));
+
+  // Strip the /api prefix used by the Vite dev proxy so the same UI build
+  // works against the prod server (which mounts routes at the root).
+  app.use((req, _res, next) => {
+    if (req.url.startsWith("/api/")) req.url = req.url.slice(4);
+    else if (req.url === "/api") req.url = "/";
+    next();
+  });
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true, service: "boop-agent" });
@@ -91,6 +102,20 @@ async function main() {
       res.status(500).json({ error: String(err) });
     }
   });
+
+  // Serve the built debug UI from /, if it exists. The Vite build outputs to
+  // debug/dist (see debug/vite.config.ts). In production the Dockerfile builds
+  // it; locally `npm run dev:debug` is preferred over the static build.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const debugDist = resolve(here, "..", "debug", "dist");
+  const debugIndex = resolve(debugDist, "index.html");
+  if (existsSync(debugIndex)) {
+    app.use(express.static(debugDist));
+    app.get(/^\/(?!api|health|sendblue|telegram|composio|agents|consolidate|chat|ws).*/, (_req, res) => {
+      res.sendFile(debugIndex);
+    });
+    console.log(`[boop] serving debug UI from ${debugDist}`);
+  }
 
   const server = createServer(app);
   const wss = new WebSocketServer({ server, path: "/ws" });

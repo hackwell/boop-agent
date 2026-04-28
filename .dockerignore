@@ -32,9 +32,9 @@ data
 
 # Heavy assets / docs that don't belong in the runtime image
 assets
-debug
 .code-review-graph
 .agents
 .claude
 .planning
 debug/dist
+debug/node_modules
