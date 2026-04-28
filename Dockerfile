@@ -17,6 +17,10 @@ RUN npm ci
 FROM node:20-bookworm-slim AS debug-build
 WORKDIR /app
 ENV NPM_CONFIG_FUND=false NPM_CONFIG_AUDIT=false
+# Vite needs VITE_* env vars at build time. Coolify passes build-time env vars
+# as --build-arg. Re-export so loadEnv picks them up.
+ARG VITE_CONVEX_URL
+ENV VITE_CONVEX_URL=${VITE_CONVEX_URL}
 COPY --from=deps /app/node_modules ./node_modules
 COPY package.json package-lock.json* ./
 COPY tsconfig.json ./
