@@ -7,8 +7,8 @@ services:
       - SERVICE_FQDN_BACKEND_3210
       - INSTANCE_NAME=boop-prod
       - INSTANCE_SECRET=${SERVICE_HEX_32_SECRET}
-      - CONVEX_CLOUD_ORIGIN=$SERVICE_FQDN_BACKEND
-      - CONVEX_SITE_ORIGIN=$SERVICE_FQDN_BACKEND
+      - CONVEX_CLOUD_ORIGIN=${SERVICE_URL_BACKEND}
+      - CONVEX_SITE_ORIGIN=${SERVICE_URL_BACKEND}
       - DISABLE_BEACON=true
       - REDACT_LOGS_TO_CLIENT=false
       - DO_NOT_REQUIRE_SSL=false
@@ -22,7 +22,7 @@ services:
     image: ghcr.io/get-convex/convex-dashboard:a9a760ca10399ed42e1b4bb87c78539a235488c7
     environment:
       - SERVICE_FQDN_DASHBOARD_6791
-      - NEXT_PUBLIC_DEPLOYMENT_URL=$SERVICE_FQDN_BACKEND
+      - NEXT_PUBLIC_DEPLOYMENT_URL=${SERVICE_URL_BACKEND}
     depends_on:
       backend:
         condition: service_healthy
